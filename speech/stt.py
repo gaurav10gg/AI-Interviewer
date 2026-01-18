@@ -8,10 +8,20 @@ STT MODULE
 """
 
 import tempfile
+import os
 import whisper
+from backend.config import WHISPER_MODEL
 
 # Load model ONCE (important for performance)
-_model = whisper.load_model("small")
+_model = None
+
+def get_model():
+    """Lazy load the Whisper model"""
+    global _model
+    if _model is None:
+        print(f"Loading Whisper model: {WHISPER_MODEL}")
+        _model = whisper.load_model(WHISPER_MODEL)
+    return _model
 
 
 def transcribe_chunk(audio_bytes: bytes) -> str:
@@ -27,14 +37,37 @@ def transcribe_chunk(audio_bytes: bytes) -> str:
     - Proper WebM → PCM conversion for better accuracy
     """
 
+    if not audio_bytes or len(audio_bytes) < 100:
+        return ""
+
     try:
-        with tempfile.NamedTemporaryFile(suffix=".webm") as tmp:
+        # Create temporary file with .webm extension
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as tmp:
+            tmp_path = tmp.name
             tmp.write(audio_bytes)
             tmp.flush()
 
-            result = _model.transcribe(tmp.name, fp16=False)
-            return result.get("text", "").strip()
+        try:
+            model = get_model()
+            
+            # Transcribe with error handling
+            result = model.transcribe(
+                tmp_path, 
+                fp16=False,
+                language="en",
+                task="transcribe"
+            )
+            
+            text = result.get("text", "").strip()
+            return text
+            
+        finally:
+            # Clean up temporary file
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
 
     except Exception as e:
-        print("STT failed:", e)
+        print(f"STT transcription error: {e}")
         return ""
